@@ -46,21 +46,21 @@ The core agent workflow is constructed as a stateful `StateGraph` in LangGraph.
 
 ```mermaid
 flowchart TD
-    Start([User Prompt / Question]) --> GenSQL[Generate SQL Node]
-    GenSQL --> ValSQL[Validate SQL Node]
-    ValSQL --> Route{Validate Router}
-    
-    Route -- "is_valid == True" --> ExecSQL[Execute SQL Node]
-    Route -- "is_valid == False & retries < 2" --> RetrySQL[Retry SQL Node]
-    Route -- "is_valid == False & retries >= 2" --> FailedNode[Failed Node]
-    
+    Start(["User Prompt / Question"]) --> GenSQL["Generate SQL Node"]
+    GenSQL --> ValSQL["Validate SQL Node"]
+    ValSQL --> Route{"Validate Router"}
+
+    Route -->|"valid"| ExecSQL["Execute SQL Node"]
+    Route -->|"invalid, retries under max"| RetrySQL["Retry SQL Node"]
+    Route -->|"invalid, max retries reached"| FailedNode["Failed Node"]
+
     RetrySQL --> ValSQL
-    FailedNode --> EndNode([End / Return Error])
-    
-    ExecSQL --> AnalyzeNode[Analyze Result Node]
-    AnalyzeNode --> ChartNode[Chart Generator Node]
-    ChartNode --> InsightNode[Insight Generator Node]
-    InsightNode --> AnswerNode[Answer Query Node]
+    FailedNode --> EndNode(["End / Return Error"])
+
+    ExecSQL --> AnalyzeNode["Analyze Result Node"]
+    AnalyzeNode --> ChartNode["Chart Generator Node"]
+    ChartNode --> InsightNode["Insight Generator Node"]
+    InsightNode --> AnswerNode["Answer Query Node"]
     AnswerNode --> EndNode
 ```
 
