@@ -435,7 +435,7 @@ The agent employs a resilient two-tier self-correction mechanism to guarantee sa
 * [ ] Add support for Microsoft SQL Server, Oracle, and Snowflake.
 * [ ] Semantic schema indexing (vector embeddings) for large enterprise databases with hundreds of tables.
 * [ ] PDF and CSV report export for charts and synthesized business insights.
-* [ ] Fine-grained user role permissions and team-shared database connections.
+
 
 ---
 
