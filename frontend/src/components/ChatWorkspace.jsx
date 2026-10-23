@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '@clerk/react';
 import { Send, Terminal, Database, Sparkles, ChevronDown, ChevronUp, Copy, Check, Info, Loader } from 'lucide-react';
 import ChartRenderer from './ChartRenderer';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const SUGGESTIONS = [
   "How many albums are in the database?",
@@ -12,75 +13,234 @@ const SUGGESTIONS = [
   "What is the average track length in minutes by genre?"
 ];
 
-export default function ChatWorkspace({ isConnected, threadId, setThreadId }) {
+export default function ChatWorkspace({
+  isConnected,
+  connectionId,
+  threadId,
+  setThreadId,
+  selectedConversation,
+  onConversationChanged,
+  onConversationLoaded,
+  onReconnectClick,
+}) {
+  const { getToken } = useAuth();
   const [messages, setMessages] = useState([]);
   const [inputVal, setInputVal] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isExecutingWorkflow, setIsExecutingWorkflow] = useState(false);
   const [copiedSqlIdx, setCopiedSqlIdx] = useState(null);
   const [expandedSqlIdxs, setExpandedSqlIdxs] = useState({});
   const [expandedTableIdxs, setExpandedTableIdxs] = useState({});
   
   const chatEndRef = useRef(null);
+  const onConversationLoadedRef = useRef(onConversationLoaded);
+
+  useEffect(() => {
+    onConversationLoadedRef.current = onConversationLoaded;
+  }, [onConversationLoaded]);
 
   useEffect(() => {
     // Scroll to bottom on new messages
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  }, [messages, isExecutingWorkflow]);
 
-  const handleSend = async (text) => {
-    if (!text.trim() || loading) return;
+  useEffect(() => {
+    let cancelled = false;
 
-    // Append user message
-    const newMessages = [...messages, { role: 'user', content: text }];
-    setMessages(newMessages);
-    setInputVal('');
-    setLoading(true);
-
-    try {
-      const response = await fetch(`${API_BASE}/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          question: text,
-          thread_id: threadId || null,
-        }),
-      });
-
-      const data = await response.json();
-      
-      // Update thread ID in parent if not set
-      if (data.thread_id && !threadId) {
-        setThreadId(data.thread_id);
+    const loadConversation = async () => {
+      if (!selectedConversation?.thread_id) {
+        setMessages([]);
+        setExpandedSqlIdxs({});
+        setExpandedTableIdxs({});
+        return;
       }
 
-      // Append bot response
-      setMessages([
-        ...newMessages,
-        {
-          role: 'agent',
-          content: data.answer || "I couldn't fetch an answer.",
-          sql: data.sql,
-          result: data.result,
-          chart: data.chart && Object.keys(data.chart).length > 0 ? data.chart : null,
-          insights: data.insights,
+      setLoadingHistory(true);
+
+      try {
+        const token = await getToken();
+
+        if (!token) {
+          throw new Error('Your session has expired. Please sign in again.');
         }
-      ]);
-    } catch (err) {
-      console.error(err);
-      setMessages([
-        ...newMessages,
-        {
-          role: 'agent',
-          content: "Sorry, I encountered an error connecting to the backend SQL Agent service. Please ensure the backend is running.",
-          isError: true
+
+        const response = await fetch(
+          `${API_BASE}/conversations/${encodeURIComponent(
+            selectedConversation.thread_id
+          )}/messages`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.detail || `Failed to load conversation (${response.status})`
+          );
         }
-      ]);
-    } finally {
-      setLoading(false);
+
+        if (cancelled) return;
+
+        if (data.conversation) {
+          onConversationLoadedRef.current?.(data.conversation);
+        }
+
+        // Convert LangGraph messages into the format used by this UI.
+        const loadedMessages = (data.messages || [])
+          .map((message) => {
+            const type = message.type || message.role;
+            const content = message.content;
+
+            // Ignore tool/system messages in this basic chat display.
+            if (!['human', 'ai', 'user', 'assistant'].includes(type)) {
+              return null;
+            }
+
+            const role =
+              type === 'human' || type === 'user' ? 'user' : 'agent';
+
+            const textContent = Array.isArray(content)
+              ? content
+                  .map((part) =>
+                    typeof part === 'string' ? part : part?.text || ''
+                  )
+                  .join('\n')
+              : typeof content === 'string'
+                ? content
+                : '';
+
+            if (!textContent.trim()) return null;
+
+            return { role, content: textContent };
+          })
+          .filter(Boolean);
+
+        setMessages(loadedMessages);
+        setExpandedSqlIdxs({});
+        setExpandedTableIdxs({});
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to load conversation:', err);
+          setMessages([
+            {
+              role: 'agent',
+              content: err.message || 'Failed to load conversation history.',
+              isError: true,
+            },
+          ]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingHistory(false);
+        }
+      }
+    };
+
+    loadConversation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedConversation?.thread_id, getToken]);
+  
+const handleSend = async (text) => {
+  if (!text.trim() || isExecutingWorkflow) return;
+
+  const activeConnId = connectionId || selectedConversation?.connection_id;
+
+  if (!activeConnId) {
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'agent',
+        content: 'Please connect to a database before sending a question.',
+        isError: true,
+      },
+    ]);
+    return;
+  }
+  const newMessages = [
+    ...messages,
+    { role: 'user', content: text }
+  ];
+
+  setMessages(newMessages);
+  setInputVal('');
+  setIsExecutingWorkflow(true);
+
+  try {
+    // Get the current Clerk session token.
+    const token = await getToken();
+
+    if (!token) {
+      throw new Error('Your session has expired. Please sign in again.');
     }
-  };
+
+    const response = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        question: text,
+        thread_id: threadId || null,
+        connection_id: activeConnId,
+      }),
+    });
+
+    const data = await response.json();
+
+    // Display backend authentication or API errors clearly.
+    if (!response.ok) {
+      throw new Error(
+        data.detail || data.message || `Request failed (${response.status})`
+      );
+    }
+
+    // Save the thread ID for follow-up questions.
+    if (data.thread_id && data.thread_id !== threadId) {
+      setThreadId(data.thread_id);
+    }
+
+    onConversationChanged?.();
+
+    setMessages([
+      ...newMessages,
+      {
+        role: 'agent',
+        content: data.answer || "I couldn't fetch an answer.",
+        sql: data.sql,
+        result: data.result,
+        chart:
+          data.chart && Object.keys(data.chart).length > 0
+            ? data.chart
+            : null,
+        insights: data.insights,
+      },
+    ]);
+  } catch (err) {
+    console.error('Chat request failed:', err);
+
+    setMessages([
+      ...newMessages,
+      {
+        role: 'agent',
+        content:
+          err.message ||
+          'Sorry, I encountered an error connecting to the backend SQL Agent service.',
+        isError: true,
+      },
+    ]);
+  } finally {
+    setIsExecutingWorkflow(false);
+  }
+};
+
 
   const handleCopySql = (sqlText, idx) => {
     navigator.clipboard.writeText(sqlText);
@@ -112,19 +272,28 @@ export default function ChatWorkspace({ isConnected, threadId, setThreadId }) {
       .filter(line => line.length > 0)
       .map(line => {
         // Remove bullets
-        return line.replace(/^[\*\-\d\.\s]+/, '').trim();
+        return line.replace(/^[*-\d.\s]+/, '').trim();
       })
       .filter(line => line.length > 0);
   };
 
-  if (!isConnected) {
+  if (!isConnected && !selectedConversation && messages.length === 0) {
     return (
       <div className="welcome-workspace" style={{ justifyContent: 'center', height: '100%' }}>
         <div className="welcome-logo">🤖</div>
         <h2>Connect Database to Chat</h2>
         <p className="welcome-subtitle">
-          Please connect to a database in the sidebar first. Once connected, you can ask questions in natural language and receive queries, interactive tables, charts, and insights.
+          Please connect to a database in the sidebar or select an existing conversation to view its history.
         </p>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={onReconnectClick}
+          style={{ marginTop: '16px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+        >
+          <Database size={16} />
+          <span>Connect Database</span>
+        </button>
       </div>
     );
   }
@@ -288,8 +457,16 @@ export default function ChatWorkspace({ isConnected, threadId, setThreadId }) {
           ))
         )}
 
-        {/* Loading / Writing State */}
-        {loading && (
+        {/* Loading History Indicator */}
+        {loadingHistory && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '16px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+            <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
+            <span>Loading conversation...</span>
+          </div>
+        )}
+
+        {/* Loading / Writing State during Query Execution */}
+        {isExecutingWorkflow && (
           <div className="chat-bubble-wrapper">
             <div className="chat-bubble agent">
               <div className="chat-avatar agent">AI</div>
@@ -310,7 +487,7 @@ export default function ChatWorkspace({ isConnected, threadId, setThreadId }) {
       </div>
 
       {/* Suggestion Chips (when messages exist) */}
-      {messages.length > 0 && !loading && (
+      {messages.length > 0 && !isExecutingWorkflow && (
         <div className="chat-suggestions">
           {SUGGESTIONS.slice(0, 3).map((suggestion, idx) => (
             <button 
@@ -327,6 +504,44 @@ export default function ChatWorkspace({ isConnected, threadId, setThreadId }) {
 
       {/* Input Text Box */}
       <div className="chat-input-bar">
+        {!isConnected && (
+          <div
+            style={{
+              padding: '10px 16px',
+              marginBottom: '10px',
+              background: 'rgba(234, 179, 8, 0.1)',
+              border: '1px solid rgba(234, 179, 8, 0.25)',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              fontSize: '0.82rem',
+              color: '#facc15',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Info size={16} style={{ flexShrink: 0 }} />
+              <span>
+                Database is disconnected. Reconnect{' '}
+                <strong>{selectedConversation?.connection_name || 'database'}</strong> to ask follow-up questions.
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onReconnectClick}
+              style={{
+                padding: '4px 10px',
+                fontSize: '0.78rem',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Reconnect
+            </button>
+          </div>
+        )}
+
         <form 
           onSubmit={(e) => {
             e.preventDefault();
@@ -339,13 +554,19 @@ export default function ChatWorkspace({ isConnected, threadId, setThreadId }) {
             className="chat-input"
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
-            placeholder={threadId ? "Ask a follow-up question..." : "Ask a question about database..."}
-            disabled={loading}
+            placeholder={
+              !isConnected
+                ? "Reconnect database above to ask questions..."
+                : threadId
+                  ? "Ask a follow-up question..."
+                  : "Ask a question about database..."
+            }
+            disabled={isExecutingWorkflow || loadingHistory || !isConnected}
           />
           <button 
             type="submit" 
             className="btn btn-primary"
-            disabled={loading || !inputVal.trim()}
+            disabled={isExecutingWorkflow || loadingHistory || !inputVal.trim() || !isConnected}
             style={{ padding: '12px 16px', borderRadius: '10px' }}
           >
             <Send size={18} />
@@ -358,9 +579,13 @@ export default function ChatWorkspace({ isConnected, threadId, setThreadId }) {
               type="button" 
               style={{ background: 'transparent', border: 'none', color: 'var(--primary-accent)', cursor: 'pointer', fontSize: '0.7rem' }}
               onClick={() => {
-                setMessages([]);
-                setThreadId('');
-              }}
+  setMessages([]);
+  setThreadId('');
+  setExpandedSqlIdxs({});
+  setExpandedTableIdxs({});
+  setCopiedSqlIdx(null);
+  onConversationChanged?.();
+}}
             >
               Start New Thread
             </button>

@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+
+import { useAuth } from '@clerk/react';
 import { Database, Upload, Server, CheckCircle, AlertCircle, Loader } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export default function ConnectionPanel({ onConnectionSuccess, currentDbStatus }) {
+  const { getToken } = useAuth();
   const [dbType, setDbType] = useState('sqlite');
   const [file, setFile] = useState(null);
   
@@ -17,6 +20,31 @@ export default function ConnectionPanel({ onConnectionSuccess, currentDbStatus }
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [savedConnections, setSavedConnections] = useState([]);
+  const [loadingSaved, setLoadingSaved] = useState(false);
+
+  const loadSavedConnections = React.useCallback(async () => {
+    try {
+      setLoadingSaved(true);
+      const token = await getToken();
+      if (!token) return;
+      const res = await fetch(`${API_BASE}/connections`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success && data.connections) {
+        setSavedConnections(data.connections);
+      }
+    } catch (e) {
+      console.error('Failed to load saved connections', e);
+    } finally {
+      setLoadingSaved(false);
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    loadSavedConnections();
+  }, [loadSavedConnections]);
 
   const handleDbTypeChange = (type) => {
     setDbType(type);
@@ -54,16 +82,27 @@ export default function ConnectionPanel({ onConnectionSuccess, currentDbStatus }
     const formData = new FormData();
     formData.append('file', file);
 
-    try {
-      const response = await fetch(`${API_BASE}/upload-sqlite`, {
-        method: 'POST',
-        body: formData,
-      });
+  try {
+  const token = await getToken();
+
+  if (!token) {
+    setErrorMsg('Please sign in again to continue.');
+    return;
+  }
+
+  const response = await fetch(`${API_BASE}/upload-sqlite`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
 
       const data = await response.json();
       if (data.success) {
         setSuccessMsg(data.message || 'SQLite Database connected successfully.');
         onConnectionSuccess({
+          connection_id: data.connection_id,
           type: 'sqlite',
           name: file.name,
         });
@@ -89,39 +128,56 @@ export default function ConnectionPanel({ onConnectionSuccess, currentDbStatus }
     setErrorMsg('');
     setSuccessMsg('');
 
-    try {
-      const response = await fetch(`${API_BASE}/connect`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          db_type: dbType,
-          host,
-          port: port ? parseInt(port, 10) : null,
-          username,
-          password,
-          database: databaseName,
-        }),
-      });
+  try {
+  const token = await getToken();
 
-      const data = await response.json();
-      if (data.success) {
-        setSuccessMsg(data.message || 'Database connected successfully.');
-        onConnectionSuccess({
-          type: dbType,
-          name: databaseName,
-          host,
-        });
-      } else {
-        setErrorMsg(data.message || 'Failed to connect to database.');
-      }
-    } catch (err) {
-      setErrorMsg('Network error. Is the backend API running at localhost:8000?');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+  if (!token) {
+    setErrorMsg('Please sign in again to continue.');
+    return;
+  }
+
+  const response = await fetch(`${API_BASE}/connect`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      db_type: dbType,
+      host,
+      port: port ? parseInt(port, 10) : null,
+      username,
+      password,
+      database: databaseName,
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.detail || data.message || `Request failed (${response.status})`
+    );
+  }
+
+  if (data.success) {
+    setSuccessMsg(data.message || 'Database connected successfully.');
+
+    onConnectionSuccess({
+      connection_id: data.connection_id,
+      type: dbType,
+      name: databaseName,
+      host,
+    });
+  } else {
+    setErrorMsg(data.message || 'Failed to connect to database.');
+  }
+} catch (err) {
+  setErrorMsg(err.message || 'Could not connect to the backend API.');
+  console.error(err);
+} finally {
+  setLoading(false);
+}
   };
 
   return (
@@ -133,8 +189,64 @@ export default function ConnectionPanel({ onConnectionSuccess, currentDbStatus }
         </p>
       </div>
 
+      {(savedConnections.length > 0 || loadingSaved) && (
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <h3 className="sidebar-section-title" style={{ margin: 0 }}>Saved Connections</h3>
+            {loadingSaved && <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />}
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '12px' }}>
+            Quickly activate a previously connected database without re-uploading:
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {savedConnections.map((conn) => {
+              const isCurrent = currentDbStatus?.connection_id === conn.id;
+              return (
+                <div
+                  key={conn.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: isCurrent ? 'rgba(139, 92, 246, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                    border: isCurrent ? '1px solid var(--primary-accent)' : '1px solid var(--border-color)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <Database size={16} style={{ color: 'var(--primary-accent)' }} />
+                    <div>
+                      <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>{conn.name}</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginLeft: '8px', textTransform: 'uppercase' }}>
+                        ({conn.db_type})
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className={isCurrent ? "btn btn-secondary" : "btn btn-primary"}
+                    disabled={isCurrent}
+                    onClick={() => {
+                      onConnectionSuccess({
+                        connection_id: conn.id,
+                        type: conn.db_type,
+                        name: conn.name,
+                      });
+                    }}
+                    style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+                  >
+                    {isCurrent ? 'Active' : 'Activate'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="card">
-        <h3 className="sidebar-section-title">Select Database Type</h3>
+        <h3 className="sidebar-section-title">Connect New Database</h3>
         <div className="db-type-selector">
           <button 
             type="button"

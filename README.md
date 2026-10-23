@@ -1,21 +1,33 @@
 # Natural Language SQL Agent
 
-An intelligent, multi-turn **Text-to-SQL AI Agent** built with **LangGraph**, **Google Gemini**, **SQLAlchemy**, and **FastAPI**, accompanied by an interactive **React** dashboard.
+An intelligent, production-ready **Text-to-SQL AI Agent** built with **LangGraph**, **Groq LLM** (`openai/gpt-oss-120b`), **SQLAlchemy 2.0**, **FastAPI**, **PostgreSQL Checkpointing**, and **Clerk Multi-Tenant Authentication**, accompanied by a modern **React 19** analytics dashboard.
 
-The agent translates natural language questions into database queries, validates queries against security policies, automatically retries broken queries, executes them across multiple database engines (SQLite, MySQL, PostgreSQL), generates visualization chart configurations, extracts business insights, and preserves conversation state using persistent **LangGraph SQLite Checkpointing**.
+The agent translates natural language questions into database queries, enforces dialect-specific SQL and strict read-only security policies, executes queries across multiple engines (**SQLite**, **MySQL**, **PostgreSQL**), recovers from syntax and runtime execution errors via an automated two-tier retry loop, generates dynamic data visualizations and business insights, and preserves conversation state across sessions using cloud **PostgreSQL Checkpointing**.
 
 ---
 
 ## 🌟 Key Features
 
-* **Multi-Database Connectivity**: Dynamically connect to **SQLite** (via file uploads), **MySQL**, and **PostgreSQL** using SQLAlchemy database engine management.
-* **LangGraph Stateful Agent Architecture**: Structured multi-node graph execution covering query generation, safety validation, automated retries, execution, result analysis, charting, insight generation, and final natural language answer synthesis.
-* **Automated Validation & Security Guardrails**: Cleans markdown fences and enforces strict read-only execution policies (blocks `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, `CREATE`, `REPLACE`, `GRANT`, `REVOKE`).
-* **Self-Correction Retry Loop**: Automatically routes invalid queries back to Gemini with database schema context and previous invalid SQL (up to `MAX_RETRIES = 2`).
-* **Persistent Thread/Session Memory**: Utilizes LangGraph's `SqliteSaver` to persist graph state snapshots into a local SQLite database (`checkpoints.sqlite`), maintaining conversation history across turns per `thread_id`.
-* **Automated Chart & Analytics Generator**: AI-driven analyzer node determines whether a result set warrants visualization and formats data into dynamic chart payloads (Bar, Line, Pie, Scatter).
-* **Automated Business Insights**: AI business analyst node synthesizes 3-5 concise, single-sentence bullet points summarizing key trends, extremes, and findings.
-* **Interactive React Frontend**: Modern Vite + React interface featuring a database connection modal, interactive schema explorer with table previews, dynamic chat interface, SQL display, data tables, and Chart.js rendering.
+* **Multi-Tenant User Authentication**: Full user authentication powered by **Clerk** (`clerk-backend-api` on FastAPI and `@clerk/react` on the frontend). Each user has private, isolated database connections and conversation histories.
+* **Encrypted Credential Storage at Rest**: Database connection URLs and uploaded file paths are securely encrypted before storage using **Fernet symmetric encryption** (`cryptography.fernet`).
+* **Multi-Database Connectivity & Auto-Restoration**: Connect dynamically to **SQLite** (via validated file uploads), **MySQL**, and **PostgreSQL**. The backend registers active engines per `connection_id` and restores connections on-demand from the application database.
+* **Dialect-Aware SQL Generation**: Detects the target engine's SQL dialect (`sqlite`, `mysql`, `postgresql`) at runtime and instructs the LLM to generate pure, dialect-compliant queries (e.g., standardizing on `LIMIT` rather than `TOP`).
+* **Two-Tier Self-Correction Architecture**:
+  1. *Pre-Execution Guardrails*: Strips markdown fences, verifies `SELECT` statements, and strictly blocks destructive operations (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, `CREATE`, `REPLACE`, `GRANT`, `REVOKE`).
+  2. *Runtime Execution Error Recovery*: If a database error occurs during query execution (e.g., column mismatch, type error, or syntax glitch), the runtime error and schema are fed back to the LLM to re-generate corrected SQL (up to `MAX_RETRIES = 2`).
+* **Cloud PostgreSQL State Checkpointing**: Replaces local file checkpoints with **`langgraph-checkpoint-postgres`** using connection pooling (`psycopg_pool.ConnectionPool`), delivering scalable multi-turn memory compatible with serverless cloud databases like **Neon**.
+* **Full Conversation Lifecycle Management**:
+  * Paginated conversation history sidebar.
+  * Real-time conversation switching with automatic connection re-binding.
+  * In-place conversation renaming (`PATCH /conversations/{thread_id}`).
+  * Conversation deletion (`DELETE /conversations/{thread_id}`), which cleans both application metadata and LangGraph checkpoint state.
+* **Automated Data Visualizations**: AI data analyzer evaluates query results and formats chart payloads (Bar, Line, Pie, Scatter) rendered in the UI with **Chart.js**.
+* **Automated Business Insights**: AI business analyst synthesizes actionable, bulleted takeaways summarizing key trends, anomalies, and findings.
+* **Interactive React 19 Frontend**:
+  * Glassmorphism dark-theme UI with responsive layouts.
+  * Interactive schema explorer with table schema inspection and live table row previews.
+  * Chat workspace with collapsible SQL preview, copy-to-clipboard, interactive result tables, and chart displays.
+* **Robust File Upload Security**: Uploaded SQLite databases are validated for file format, size limits (up to 50 MiB), and verified using SQLite `PRAGMA quick_check` before registration.
 
 ---
 
@@ -23,41 +35,51 @@ The agent translates natural language questions into database queries, validates
 
 ### Backend
 * **Python 3.10+**
-* **FastAPI** & **Uvicorn**: RESTful Web Server API
-* **LangGraph** & **LangChain Core**: AI Workflow Orchestration & Message Management
-* **Google Gemini (`gemini-3.6-flash`)**: LLM for SQL generation, result analysis, and natural language response synthesis
-* **`langgraph-checkpoint-sqlite`**: SQLite-backed state checkpointer (`SqliteSaver`)
-* **SQLAlchemy**: Multi-database connection manager and raw query execution engine
-* **PyMySQL** & **Psycopg2**: Database drivers for MySQL and PostgreSQL
+* **FastAPI** & **Uvicorn**: Async web framework with lifespan management and CORS middleware.
+* **LangGraph** & **LangChain Core**: AI workflow state machine with conditional routing and message reducers.
+* **Groq (`langchain-groq`)**: Fast LLM inference using `openai/gpt-oss-120b` (compatible with Google Gemini or Meta Llama).
+* **LangGraph PostgreSQL Checkpointer (`langgraph-checkpoint-postgres`)**: Cloud state persistence using `psycopg_pool.ConnectionPool`.
+* **SQLAlchemy 2.0**: ORM for application metadata and raw query execution across heterogeneous databases.
+* **Clerk Backend API (`clerk-backend-api`)**: Server-side session verification, bearer token parsing, and authorized party enforcement.
+* **Cryptography (`cryptography.fernet`)**: Symmetric encryption for sensitive database credentials.
+* **Database Drivers**:
+  * `psycopg` (v3) & `psycopg2-binary`: PostgreSQL driver and connection pooling.
+  * `PyMySQL`: MySQL driver.
+  * `sqlite3`: Native SQLite support with PRAGMA quick-check verification.
 
 ### Frontend
-* **React 19** & **Vite**: Modern UI framework and build setup
-* **Chart.js** & **React-Chartjs-2**: Dynamic data visualization
-* **Lucide React**: UI icons
-* **Vanilla CSS**: Clean visual design and responsiveness
+* **React 19** & **Vite 8**: Frontend library and build tooling.
+* **@clerk/react**: Authentication hooks (`useAuth`), `<SignInButton />`, `<SignUpButton />`, and `<UserButton />`.
+* **Chart.js** & **react-chartjs-2**: Dynamic client-side chart rendering.
+* **Lucide React**: Clean iconography.
+* **Vanilla CSS**: Responsive design system and theme variables.
 
 ---
 
 ## 📐 Architecture & Workflow
 
-The core agent workflow is constructed as a stateful `StateGraph` in LangGraph.
+The agent operates as a stateful `StateGraph` in LangGraph with dual validation and execution recovery loops.
 
 ### Agent Flow Diagram
 
 ```mermaid
 flowchart TD
-    Start(["User Prompt / Question"]) --> GenSQL["Generate SQL Node"]
-    GenSQL --> ValSQL["Validate SQL Node"]
-    ValSQL --> Route{"Validate Router"}
+    Start(["User Prompt / Question"]) --> GenSQL["Generate SQL Node<br/><i>(Dialect-aware prompt)</i>"]
+    GenSQL --> ValSQL["Validate SQL Node<br/><i>(Read-only & safety filter)</i>"]
+    ValSQL --> ValRoute{"Validate Router"}
 
-    Route -->|"valid"| ExecSQL["Execute SQL Node"]
-    Route -->|"invalid, retries under max"| RetrySQL["Retry SQL Node"]
-    Route -->|"invalid, max retries reached"| FailedNode["Failed Node"]
+    ValRoute -->|"valid"| ExecSQL["Execute SQL Node<br/><i>(Run on database engine)</i>"]
+    ValRoute -->|"invalid, retries < max"| RetrySQL["Retry SQL Node<br/><i>(Re-prompt with error)</i>"]
+    ValRoute -->|"invalid, max retries reached"| FailedNode["Failed Node"]
+
+    ExecSQL --> ExecRoute{"Execute Router"}
+    ExecRoute -->|"query success"| AnalyzeNode["Analyze Result Node"]
+    ExecRoute -->|"runtime error, retries < max"| RetrySQL
+    ExecRoute -->|"runtime error, max retries reached"| FailedNode
 
     RetrySQL --> ValSQL
-    FailedNode --> EndNode(["End / Return Error"])
+    FailedNode --> EndNode(["End / Fallback Message"])
 
-    ExecSQL --> AnalyzeNode["Analyze Result Node"]
     AnalyzeNode --> ChartNode["Chart Generator Node"]
     ChartNode --> InsightNode["Insight Generator Node"]
     InsightNode --> AnswerNode["Answer Query Node"]
@@ -66,80 +88,107 @@ flowchart TD
 
 ### LangGraph Workflow Stages
 
-1. **`generate_sql`**: Reads database schema and thread conversation history to prompt Gemini for SQLite SELECT syntax.
-2. **`validate_sql`**: Strips markdown blocks and verifies that the query starts with `SELECT` and contains no destructive SQL keywords.
-3. **`validate_route`**: Conditional router determining whether to proceed to execution, attempt a self-correction retry, or terminate as failed.
-4. **`retry_sql`**: Increments `retries` count and prompts Gemini with the previous invalid SQL and schema to obtain a corrected query.
-5. **`execute_sql`**: Runs validated query against the connected SQLAlchemy database engine and converts rows into standard Python dictionaries.
-6. **`analyze`**: Evaluates query results and decides whether to generate charts (bar, line, pie, scatter) and business insights.
-7. **`chart`**: Extracts X/Y axis series data from result dictionaries for Chart.js rendering.
-8. **`insights`**: Prompts Gemini to generate 3-5 concise, actionable business summary points based on the returned dataset.
-9. **`answer_query`**: Generates natural language summary of the dataset and appends `HumanMessage` and `AIMessage` to thread conversation history in `GraphState`.
-10. **`failed`**: Returns a graceful fallback message when query validation cannot pass within maximum retries.
+1. **`generate_sql`**: Inspects target database dialect (`SQLite`, `MySQL`, `PostgreSQL`) and schema, incorporates multi-turn conversation history, and prompts the LLM for pure SQL.
+2. **`validate_sql`**: Cleans markdown code blocks, strips SQL comments, verifies query starts with `SELECT`, and blocks destructive keywords.
+3. **`validate_route`**: Checks safety validation; routes to `execute_sql` if valid, `retry_sql` if attempts remain, or `failed` if `MAX_RETRIES` is reached.
+4. **`execute_sql`**: Executes query on the selected database engine via SQLAlchemy. Captures returned rows as dictionaries, or intercepts SQL execution exceptions.
+5. **`execute_route`**: Checks execution outcome; routes to `analyze` if rows were returned, or back to `retry_sql` with the error message if execution failed.
+6. **`retry_sql`**: Increments retry counter and re-prompts LLM with the database dialect, schema, previous invalid query, and the exact database error message.
+7. **`analyze`**: Evaluates result set to decide if a chart is beneficial and determines chart type (bar, line, pie, scatter).
+8. **`chart`**: Extracts labels and numerical series arrays for Chart.js payloads.
+9. **`insights`**: AI business analyst crafts 3-5 concise bullet points highlighting key business trends and outliers.
+10. **`answer_query`**: Produces a natural language answer summarizing results and appends messages to state history.
+11. **`failed`**: Returns a polite failure explanation to the client without terminating the server.
 
 ---
 
-## 💾 Thread & Session Persistence (`SqliteSaver`)
+## 💾 Multi-Tenant Storage & Persistence Architecture
 
-State persistence is managed via LangGraph's `SqliteSaver` checkpointer.
+The project separates **Application Metadata**, **LangGraph Checkpoints**, and **User Target Databases**:
 
-```python
-from langgraph.checkpoint.sqlite import SqliteSaver
-import sqlite3
-
-db_path = os.path.join(os.path.dirname(__file__), "checkpoints.sqlite")
-conn = sqlite3.connect(db_path, check_same_thread=False)
-memory = SqliteSaver(conn)
-memory.setup()
-
-workflow = graph.compile(checkpointer=memory)
+```
+                       ┌────────────────────────────────────────────────────────┐
+                       │                     FastAPI Server                     │
+                       └──────────────┬───────────────────┬─────────────────────┘
+                                      │                   │
+                     Clerk User ID    │                   │   LangGraph Thread ID
+                                      ▼                   ▼
+    ┌───────────────────────────────────┐               ┌───────────────────────────────────────┐
+    │     Application Database (Neon)   │               │   LangGraph Checkpoint Database (Neon)│
+    │  - database_connections (Encrypted│               │  - checkpoints                        │
+    │  - conversations (Title, Owner)   │               │  - checkpoint_blobs                   │
+    └───────────────────────────────────┘               │  - checkpoint_writes                  │
+                                                        └───────────────────────────────────────┘
+                                      │
+                     Connection ID    ▼
+    ┌──────────────────────────────────────────────────────────────────┐
+    │                     Target Databases (Per User)                  │
+    │  • Uploaded SQLite (.sqlite files in backend/uploads/)           │
+    │  • Remote MySQL Servers                                          │
+    │  • Remote PostgreSQL Servers                                     │
+    └──────────────────────────────────────────────────────────────────┘
 ```
 
-* **Thread Snapshots**: Every state modification across graph nodes is committed to `backend/checkpoints.sqlite` using a unique `thread_id`.
-* **Multi-Turn Context**: Past user questions and assistant answers stored in `state["messages"]` are preserved across requests, allowing follow-up questions (e.g., *"Filter the previous query by year 2023"*).
+1. **Application Database (`app_database.py`)**:
+   * Uses SQLAlchemy ORM connecting to `APP_DATABASE_URL` (PostgreSQL / Neon).
+   * **`database_connections` table**: Stores connection metadata (`id`, `owner_id`, `name`, `db_type`, `encrypted_url`, `created_at`).
+   * **`conversations` table**: Tracks threads per user (`thread_id`, `owner_id`, `connection_id`, `title`, `created_at`, `updated_at`).
+2. **Credential Encryption (`Fernet`)**:
+   * Connection strings and filesystem paths are encrypted before storing in `database_connections.encrypted_url`.
+   * Credentials are only decrypted in-memory during active engine connection restoration.
+3. **LangGraph State Checkpointer (`graph.py`)**:
+   * Utilizes `PostgresSaver` backed by a `psycopg_pool.ConnectionPool` (`LANGGRAPH_CHECKPOINT_URL`).
+   * Automatically initializes checkpoint schema tables (`checkpointer.setup()`).
 
 ---
 
 ## 📂 Project Structure
 
 ```
-Natural Language SQL Agent/
+natural-language-sql-agent/
 ├── backend/
-│   ├── analyzer.py            # AI result analysis & chart type determination
-│   ├── api.py                 # FastAPI application routes & endpoints
-│   ├── chart_generator.py     # Prepares chart labels and data arrays
-│   ├── checkpoints.sqlite     # LangGraph SqliteSaver local state checkpoint database
-│   ├── config.py              # Application settings (MAX_RETRIES = 2)
-│   ├── database.py            # SQLAlchemy DatabaseManager (SQLite, MySQL, Postgres)
-│   ├── formatter.py           # Text formatting utilities
-│   ├── graph.py               # LangGraph StateGraph definition & SqliteSaver setup
-│   ├── insight_generator.py   # AI business insight generation node
-│   ├── llm.py                 # Gemini LLM setup (gemini-3.6-flash)
-│   ├── main.py                # CLI runner entrypoint
-│   ├── models.py              # Pydantic request models (ChatRequest, ConnectRequest)
-│   ├── nodes.py               # Graph node function implementations
-│   ├── retry_generator.py     # Self-correction query retry logic
-│   ├── routes.py              # Conditional routing logic (validate_route)
-│   ├── sql_generator.py       # SQL query generation prompt logic
-│   ├── sql_validator.py       # Query syntax cleaner & read-only safety checker
-│   ├── state.py               # GraphState TypedDict definition
-│   └── uploads/               # Uploaded SQLite database files storage
+│   ├── analyzer.py               # Evaluates results and selects chart types
+│   ├── api.py                    # FastAPI application, auth middleware, and REST routes
+│   ├── app_database.py           # Application DB models (User connections & conversations)
+│   ├── auth.py                   # Clerk authentication dependency (require_user)
+│   ├── chart_generator.py        # Generates X/Y data series for Chart.js
+│   ├── config.py                 # Configuration settings (MAX_RETRIES = 2)
+│   ├── database.py               # SQLAlchemy DatabaseManager (engine pool & auto-restore)
+│   ├── formatter.py              # Text and output formatting utilities
+│   ├── graph.py                  # LangGraph StateGraph & PostgresSaver setup
+│   ├── insight_generator.py      # Business insight synthesis node
+│   ├── llm.py                    # Groq ChatGroq LLM initialization (openai/gpt-oss-120b)
+│   ├── main.py                   # CLI test runner entrypoint
+│   ├── models.py                 # Pydantic schemas (ChatRequest, ConnectRequest, etc.)
+│   ├── nodes.py                  # Graph node implementations
+│   ├── retry_generator.py        # Error-aware & dialect-aware query correction
+│   ├── routes.py                 # Conditional edge routers (validate_route, execute_route)
+│   ├── sql_generator.py          # Dialect-aware SQL generator prompt
+│   ├── sql_validator.py          # SQL cleaner & read-only AST safety validation
+│   ├── state.py                  # GraphState TypedDict definition
+│   └── uploads/                  # Upload directory for user SQLite database files
 ├── database/
-│   └── Chinook.sqlite         # Sample SQLite database (Chinook music database)
+│   └── Chinook.sqlite            # Sample SQLite database for testing
 ├── frontend/
-│   ├── public/                # Static web assets
+│   ├── public/                   # Static web assets
 │   ├── src/
-│   │   ├── components/        # React components (ChatWorkspace, SchemaExplorer, etc.)
-│   │   ├── App.css            # Styles for main layout
-│   │   ├── App.jsx            # Main dashboard component
-│   │   ├── index.css          # Design system & CSS variables
-│   │   └── main.jsx           # React app entry point
-│   ├── package.json           # Frontend dependencies & Vite scripts
-│   └── vite.config.js         # Vite configuration file
-├── .env                       # Environment variables (API Keys)
-├── .gitignore                 # Git ignore rules
-├── requirements.txt           # Python backend dependencies
-└── README.md                  # Project documentation
+│   │   ├── components/
+│   │   │   ├── ChartRenderer.jsx       # Chart.js dynamic chart component
+│   │   │   ├── ChatWorkspace.jsx       # Conversation messages, SQL viewer, & data tables
+│   │   │   ├── ConnectionPanel.jsx     # Connection form (upload, credentials, saved DBs)
+│   │   │   ├── ConversationSidebar.jsx # Sidebar: history list, rename, delete, new chat
+│   │   │   └── SchemaExplorer.jsx      # Interactive schema browser & row previewer
+│   │   ├── App.css               # Main application layout styles
+│   │   ├── App.jsx               # Dashboard, Clerk authentication gates, & tab views
+│   │   ├── index.css             # Theme variables & glassmorphism styling
+│   │   └── main.jsx              # React DOM entry point wrapped with ClerkProvider
+│   ├── package.json              # Frontend scripts and dependencies
+│   └── vite.config.js            # Vite configuration
+├── init_app_db.py                # Database migration script to initialize app tables
+├── .env                          # Root environment variables
+├── .gitignore                    # Git ignore file
+├── requirements.txt              # Python dependencies
+└── README.md                     # Project documentation
 ```
 
 ---
@@ -150,37 +199,82 @@ Natural Language SQL Agent/
 * **Python**: 3.10 or higher
 * **Node.js**: 18.0 or higher
 * **npm**: 9.0 or higher
-* **Google Gemini API Key**: Obtain from [Google AI Studio](https://aistudio.google.com/)
+* **PostgreSQL / Neon Database**: A PostgreSQL database for application records and LangGraph checkpoints (e.g. from [Neon](https://neon.tech)).
+* **Clerk Account**: Free account from [Clerk.com](https://clerk.com) for authentication.
+* **Groq API Key**: Free API key from [Groq Console](https://console.groq.com) (or Google Gemini API key if using Gemini).
+
+---
 
 ### 1. Environment Configuration
+
+#### Project Root `.env` (Backend Configuration)
 Create a `.env` file in the project root:
 
 ```env
-GOOGLE_API_KEY=your_gemini_api_key_here
+# Application Database (PostgreSQL / Neon)
+APP_DATABASE_URL="postgresql+psycopg://username:password@ep-sample-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require"
+
+# LangGraph Checkpoints (PostgreSQL / Neon)
+LANGGRAPH_CHECKPOINT_URL="postgresql://username:password@ep-sample-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require"
+
+# Fernet Key for encrypting database credentials (32 url-safe base64-encoded bytes)
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+CONNECTION_ENCRYPTION_KEY="your-generated-fernet-key-here"
+
+# LLM API Key (Groq)
+GROQ_API_KEY="gsk_your_groq_api_key_here"
+
+# (Optional) Google Gemini API Key
+GOOGLE_API_KEY="your_google_api_key_here"
 ```
+
+#### Backend `.env` (`backend/.env`)
+Create `backend/.env` for Clerk configuration:
+
+```env
+CLERK_SECRET_KEY="sk_test_your_clerk_secret_key"
+CLERK_PUBLISHABLE_KEY="pk_test_your_clerk_publishable_key"
+CLERK_AUTHORIZED_PARTIES="http://localhost:5173"
+# (Optional) CLERK_JWT_KEY="-----BEGIN PUBLIC KEY-----\n..."
+```
+
+#### Frontend `.env` (`frontend/.env`)
+Create `frontend/.env` for the React application:
+
+```env
+VITE_CLERK_PUBLISHABLE_KEY="pk_test_your_clerk_publishable_key"
+VITE_API_BASE_URL="http://localhost:8000"
+```
+
+---
 
 ### 2. Backend Setup
 
 ```bash
-# Create and activate Python virtual environment
-python -m venv my_env
+# 1. Create and activate a Python virtual environment
+python -m venv .venv
 
-# Windows PowerShell:
-.\my_env\Scripts\Activate.ps1
+# Windows (PowerShell):
+.venv\Scripts\Activate.ps1
 # Linux/macOS:
-source my_env/bin/activate
+source .venv/bin/activate
 
-# Install Python dependencies
+# 2. Install dependencies
 pip install -r requirements.txt
+
+# 3. Initialize the Application Database Tables (database_connections & conversations)
+python init_app_db.py
 ```
+
+---
 
 ### 3. Frontend Setup
 
 ```bash
-# Navigate to frontend folder
+# 1. Navigate to the frontend directory
 cd frontend
 
-# Install Node dependencies
+# 2. Install frontend dependencies
 npm install
 ```
 
@@ -188,84 +282,98 @@ npm install
 
 ## 🚀 Running the Application
 
-### Start Backend Server
+### 1. Start the Backend API
 
 ```bash
-# From project root directory
+# From the project root (with .venv active):
 cd backend
 uvicorn api:app --reload --port 8000
 ```
-Backend API will run at `http://localhost:8000`.
+The FastAPI backend will start at `http://localhost:8000`. You can explore the interactive OpenAPI documentation at `http://localhost:8000/docs`.
 
-### Start Frontend Server
+### 2. Start the Frontend Dashboard
 
 ```bash
-# From frontend folder
+# In a separate terminal, navigate to the frontend directory:
 cd frontend
 npm run dev
 ```
-Frontend application will be available at `http://localhost:5173`.
+The application will open at `http://localhost:5173`.
 
 ---
 
-## 📡 API Endpoints & Example Usage
+## 📡 API Endpoints Reference
 
-### 1. Upload SQLite Database (`POST /upload-sqlite`)
-Uploads a `.sqlite` or `.db` file and connects it to the engine.
+All secured endpoints require the header:
+```
+Authorization: Bearer <clerk_session_token>
+```
 
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/connect` | Connect and securely save a MySQL or PostgreSQL database. |
+| `POST` | `/upload-sqlite` | Upload, validate (`PRAGMA quick_check`), and register a `.sqlite`/`.db` file. |
+| `GET` | `/connections` | List all saved database connections for the authenticated user. |
+| `GET` | `/tables?connection_id={id}` | List table names for the selected database. |
+| `GET` | `/schema?connection_id={id}` | Retrieve full table and column schema dictionary. |
+| `GET` | `/preview/{table_name}?connection_id={id}` | Preview up to 10 sample rows from a specific table. |
+| `POST` | `/chat` | Execute a natural language question through the LangGraph agent. |
+| `GET` | `/conversations` | List conversation histories for the authenticated user (paginated). |
+| `GET` | `/conversations/{thread_id}/messages` | Retrieve full message history and database status for a thread. |
+| `PATCH` | `/conversations/{thread_id}` | Rename a conversation title. |
+| `DELETE` | `/conversations/{thread_id}` | Delete a conversation and purge its LangGraph checkpoint state. |
+
+---
+
+### API Usage Examples
+
+#### 1. Upload SQLite Database (`POST /upload-sqlite`)
 ```bash
 curl -X POST "http://localhost:8000/upload-sqlite" \
+  -H "Authorization: Bearer <YOUR_CLERK_TOKEN>" \
   -F "file=@database/Chinook.sqlite"
 ```
-
-### 2. Connect Database (`POST /connect`)
-Connects to a MySQL or PostgreSQL server.
-
+**Response:**
 ```json
-POST /connect
-{
-  "db_type": "mysql",
-  "host": "localhost",
-  "port": 3306,
-  "username": "root",
-  "password": "yourpassword",
-  "database": "sales_db"
-}
-```
-
-### 3. Get Schema (`GET /schema`)
-Returns all tables and column definitions.
-
-```json
-GET /schema
 {
   "success": true,
-  "schema": {
-    "Artist": [
-      { "name": "ArtistId", "type": "INTEGER" },
-      { "name": "Name", "type": "NVARCHAR(120)" }
-    ]
-  }
+  "connection_id": "b3f021ad-1a84-48f8-b613-2df82479e008",
+  "message": "SQLite database uploaded and saved successfully."
 }
 ```
 
-### 4. Execute Chat Query (`POST /chat`)
-Executes a multi-turn natural language question through the LangGraph workflow.
+#### 2. Connect Remote Database (`POST /connect`)
+```bash
+curl -X POST "http://localhost:8000/connect" \
+  -H "Authorization: Bearer <YOUR_CLERK_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db_type": "postgres",
+    "host": "localhost",
+    "port": 5432,
+    "username": "postgres",
+    "password": "yourpassword",
+    "database": "sales_db"
+  }'
+```
 
-**Request:**
-```json
-POST /chat
-{
-  "question": "What are the top 5 most popular music genres by track count?",
-  "thread_id": "session-12345"
-}
+#### 3. Execute Chat Query (`POST /chat`)
+```bash
+curl -X POST "http://localhost:8000/chat" \
+  -H "Authorization: Bearer <YOUR_CLERK_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What are the top 5 genres by total track count?",
+    "connection_id": "b3f021ad-1a84-48f8-b613-2df82479e008",
+    "thread_id": "0b15da07-9b43-41ea-bfcf-6d654b4231b4"
+  }'
 ```
 
 **Response:**
 ```json
 {
-  "thread_id": "session-12345",
-  "question": "What are the top 5 most popular music genres by track count?",
+  "thread_id": "0b15da07-9b43-41ea-bfcf-6d654b4231b4",
+  "question": "What are the top 5 genres by total track count?",
   "sql": "SELECT Genre.Name, COUNT(Track.TrackId) AS TrackCount FROM Track JOIN Genre ON Track.GenreId = Genre.GenreId GROUP BY Genre.Name ORDER BY TrackCount DESC LIMIT 5;",
   "result": [
     { "Name": "Rock", "TrackCount": 1297 },
@@ -274,7 +382,7 @@ POST /chat
     { "Name": "Alternative & Punk", "TrackCount": 332 },
     { "Name": "Jazz", "TrackCount": 130 }
   ],
-  "answer": "The top 5 most popular music genres by track count are Rock (1,297 tracks), Latin (579 tracks), Metal (374 tracks), Alternative & Punk (332 tracks), and Jazz (130 tracks).",
+  "answer": "The top 5 genres by total track count are Rock (1,297 tracks), Latin (579 tracks), Metal (374 tracks), Alternative & Punk (332 tracks), and Jazz (130 tracks).",
   "analysis": {
     "generate_chart": true,
     "chart_type": "bar",
@@ -288,31 +396,49 @@ POST /chat
     "x": ["Rock", "Latin", "Metal", "Alternative & Punk", "Jazz"],
     "y": [1297, 579, 374, 332, 130]
   },
-  "insights": "• Rock is by far the leading genre with nearly double the tracks of Latin.\n• The top 3 genres account for the vast majority of the catalog.\n• Jazz has the lowest representation among the top 5 with 130 tracks."
+  "insights": "• Rock represents the dominant genre in the collection with over 1,200 tracks.\n• Latin holds second place with roughly half the catalog volume of Rock.\n• The top three genres collectively account for over 60% of the top 5 catalogue.",
+  "messages": [ ... ]
 }
 ```
 
 ---
 
-## 🛡️ Error Handling & Self-Correction
+## 🛡️ Error Handling & Two-Tier Self-Correction
 
-When an invalid or unsafe SQL query is generated:
-1. **Safety Filter**: If the query attempts non-SELECT operations (`DELETE`, `DROP`, `UPDATE`, etc.), `validate_sql` raises a `ValueError`.
-2. **Retry Route**: `validate_route` detects `is_valid == False` and checks `retries < MAX_RETRIES`.
-3. **LLM Re-prompting**: `retry_sql` passes the invalid query and schema back to Gemini to request a corrected query.
-4. **Fallback**: If the query remains invalid after 2 retry attempts, the workflow routes to `failed_node`, returning a clean failure message to the client without breaking the backend.
+The agent employs a resilient two-tier self-correction mechanism to guarantee safe and accurate query resolution:
+
+1. **Safety & Syntax Verification (`validate_sql`)**:
+   - Cleans backticks and markdown fences.
+   - Rejects queries containing destructive keywords (`DROP`, `DELETE`, `UPDATE`, `INSERT`, etc.).
+   - Ensures queries begin with a valid `SELECT` statement.
+2. **Runtime Database Error Feedback (`execute_sql`)**:
+   - If a query fails execution against the database engine (for example, column mismatch or SQL syntax error), the exception message is captured in `state["error"]`.
+   - The workflow routes to `retry_node`, feeding the database schema, previous broken query, and the exact database error back into the LLM.
+   - The LLM receives clear instructions to correct the syntax according to the specific dialect rules.
+3. **Graceful Degradation (`failed_node`)**:
+   - If a valid query cannot be produced within `MAX_RETRIES = 2`, the agent outputs a user-friendly explanation with details of the failure without crashing the service.
 
 ---
 
-## 🔮 Future Enhancements
+## 🔒 Security Best Practices
 
-* Add support for enterprise databases such as SQL Server and Snowflake.
-* Implement query result caching to reduce LLM calls for recurring questions.
-* Add option to export generated charts and business insights to PDF/CSV reports.
-* Integrate schema indexing/embeddings for massive database schemas with hundreds of tables.
+* **Read-Only Enforcement**: Blocks mutating and administrative SQL commands via regex and AST parsing.
+* **Dialect Escaping**: Relies on SQLAlchemy URL composition and parameterized identifier inspection.
+* **Encrypted Credentials**: All connection URLs and SQLite file paths are encrypted at rest with Fernet keys.
+* **File Upload Protections**: Enforces maximum upload sizes (50 MiB) and performs a SQLite PRAGMA quick check to reject corrupt files.
+* **Multi-Tenant Isolation**: Every database connection and chat conversation is scoped strictly to the authenticated Clerk user identity (`sub` claim).
+
+---
+
+## 🔮 Future Roadmap
+
+* [ ] Add support for Microsoft SQL Server, Oracle, and Snowflake.
+* [ ] Semantic schema indexing (vector embeddings) for large enterprise databases with hundreds of tables.
+* [ ] PDF and CSV report export for charts and synthesized business insights.
+* [ ] Fine-grained user role permissions and team-shared database connections.
 
 ---
 
 ## 👤 Author
 
-Developed as a modern Natural Language SQL Agent project using Python, LangGraph, and React.
+Developed as an advanced Natural Language SQL Agent project using **Python**, **LangGraph**, **Groq**, **PostgreSQL**, and **React**.

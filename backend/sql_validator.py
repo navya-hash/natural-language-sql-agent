@@ -36,8 +36,15 @@ def clean_sql(sql: str) -> str:
     if match:
         sql = match.group(1)
 
-    # Remove leading/trailing whitespace
-    sql = sql.strip()
+    # Remove leading/trailing whitespace and backticks
+    sql = sql.strip("` \n\r\t")
+
+    # Strip leading SQL comments if present
+    while sql.startswith("--"):
+        newline_idx = sql.find("\n")
+        if newline_idx == -1:
+            break
+        sql = sql[newline_idx + 1:].strip()
 
     return sql
 

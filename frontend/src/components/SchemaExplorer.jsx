@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Table, Layers, Eye, Info, HelpCircle } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@clerk/react';
+import { Table, Layers, Eye, HelpCircle, AlertCircle } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-export default function SchemaExplorer({ isConnected }) {
+export default function SchemaExplorer({ isConnected, connectionId }) {
+  const { getToken } = useAuth();
   const [tables, setTables] = useState([]);
   const [schemaDict, setSchemaDict] = useState({});
   const [selectedTable, setSelectedTable] = useState('');
@@ -12,9 +14,86 @@ export default function SchemaExplorer({ isConnected }) {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  const fetchWithAuth = useCallback(async (path) => {
+    const token = await getToken();
+    if (!token) {
+      throw new Error('Please sign in again.');
+    }
+    const response = await fetch(`${API_BASE}${path}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        data.detail || data.message || `Request failed (${response.status})`
+      );
+    }
+    return data;
+  }, [getToken]);
+
+  const fetchSchema = useCallback(async () => {
+    if (!connectionId) return;
+    setLoadingSchema(true);
+    setErrorMsg('');
+
+    try {
+      const tablesData = await fetchWithAuth(
+        `/tables?connection_id=${encodeURIComponent(connectionId)}`
+      );
+      const schemaData = await fetchWithAuth(
+        `/schema?connection_id=${encodeURIComponent(connectionId)}`
+      );
+
+      if (tablesData.success && schemaData.success) {
+        setTables(tablesData.tables);
+        setSchemaDict(schemaData.schema);
+
+        if (tablesData.tables.length > 0) {
+          setSelectedTable(tablesData.tables[0]);
+        } else {
+          setSelectedTable('');
+          setPreviewRows([]);
+        }
+      } else {
+        setErrorMsg('Failed to load database schema from backend.');
+      }
+    } catch (err) {
+      console.error('Failed to fetch database schema:', err);
+      setErrorMsg(err.message || 'Failed to load database schema.');
+    } finally {
+      setLoadingSchema(false);
+    }
+  }, [connectionId, fetchWithAuth]);
+
+  const fetchPreview = useCallback(async (tableName) => {
+    if (!connectionId || !tableName) return;
+    setLoadingPreview(true);
+
+    try {
+      const data = await fetchWithAuth(
+        `/preview/${encodeURIComponent(tableName)}?connection_id=${encodeURIComponent(connectionId)}`
+      );
+
+      if (data.success) {
+        setPreviewRows(data.rows);
+      } else {
+        setPreviewRows([]);
+        setErrorMsg(data.message || 'Failed to load table preview.');
+      }
+    } catch (err) {
+      console.error('Failed to fetch table preview:', err);
+      setPreviewRows([]);
+      setErrorMsg(err.message || 'Failed to fetch table preview.');
+    } finally {
+      setLoadingPreview(false);
+    }
+  }, [connectionId, fetchWithAuth]);
+
   // Fetch tables and schema dictionary on load or change in connection
   useEffect(() => {
-    if (isConnected) {
+    if (isConnected && connectionId) {
       fetchSchema();
     } else {
       setTables([]);
@@ -22,60 +101,14 @@ export default function SchemaExplorer({ isConnected }) {
       setSelectedTable('');
       setPreviewRows([]);
     }
-  }, [isConnected]);
+  }, [isConnected, connectionId, fetchSchema]);
 
   // Fetch preview when selectedTable changes
   useEffect(() => {
-    if (selectedTable) {
+    if (selectedTable && connectionId) {
       fetchPreview(selectedTable);
     }
-  }, [selectedTable]);
-
-  const fetchSchema = async () => {
-    setLoadingSchema(true);
-    setErrorMsg('');
-    try {
-      // 1. Fetch tables list
-      const tablesRes = await fetch(`${API_BASE}/tables`);
-      const tablesData = await tablesRes.json();
-      
-      // 2. Fetch schema structure dict
-      const schemaRes = await fetch(`${API_BASE}/schema`);
-      const schemaData = await schemaRes.json();
-
-      if (tablesData.success && schemaData.success) {
-        setTables(tablesData.tables);
-        setSchemaDict(schemaData.schema);
-        if (tablesData.tables.length > 0) {
-          setSelectedTable(tablesData.tables[0]);
-        }
-      } else {
-        setErrorMsg('Failed to load database schema from backend.');
-      }
-    } catch (err) {
-      setErrorMsg('Failed to connect to backend server schema endpoints.');
-      console.error(err);
-    } finally {
-      setLoadingSchema(false);
-    }
-  };
-
-  const fetchPreview = async (tableName) => {
-    setLoadingPreview(true);
-    try {
-      const response = await fetch(`${API_BASE}/preview/${tableName}`);
-      const data = await response.json();
-      if (data.success) {
-        setPreviewRows(data.rows);
-      } else {
-        setPreviewRows([]);
-      }
-    } catch (err) {
-      console.error('Failed to fetch table preview', err);
-    } finally {
-      setLoadingPreview(false);
-    }
-  };
+  }, [selectedTable, connectionId, fetchPreview]);
 
   if (!isConnected) {
     return (
@@ -96,6 +129,12 @@ export default function SchemaExplorer({ isConnected }) {
       {/* Tables Sidebar */}
       <div className="explorer-sidebar">
         <h3 className="sidebar-section-title">Database Tables</h3>
+        {errorMsg && (
+          <div style={{ display: 'flex', gap: '6px', color: 'var(--error, #ef4444)', fontSize: '0.8rem', marginBottom: '8px' }}>
+            <AlertCircle size={14} style={{ flexShrink: 0 }} />
+            <span>{errorMsg}</span>
+          </div>
+        )}
         {loadingSchema ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading schema...</div>
         ) : (

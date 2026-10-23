@@ -1,51 +1,51 @@
 
-from graph import workflow
+# from graph import workflow
 
-config = {
-    "configurable": {
-        "thread_id": "user_1"
-    }
-}
+# config = {
+#     "configurable": {
+#         "thread_id": "user_1"
+#     }
+# }
 
-question = input("Ask: ")
+# question = input("Ask: ")
 
-state = {
+# state = {
 
-    "messages": [],
+#     "messages": [],
 
-    "question": question,
+#     "question": question,
 
-    "sql": "",
+#     "sql": "",
 
-    "retries": 0,
+#     "retries": 0,
 
-    "is_valid": False,
+#     "is_valid": False,
 
-    "result": [],
+#     "result": [],
 
-    "analysis": {},
+#     "analysis": {},
 
-    "chart": {},
+#     "chart": {},
 
-    "insights": "",
+#     "insights": "",
 
-    "answer": ""
-}
+#     "answer": ""
+# }
 
-result = workflow.invoke(state,config=config)
+# result = workflow.invoke(state,config=config)
 
-# print("\nGenerated SQL:")
-# print(result["sql"])
+# # print("\nGenerated SQL:")
+# # print(result["sql"])
 
-# print("\nAnswer:")
-# print(result["answer"])
-# print(result)
+# # print("\nAnswer:")
+# # print(result["answer"])
+# # print(result)
 
-# print(result["analysis"])
-# print(result["messages"])
+# # print(result["analysis"])
+# # print(result["messages"])
 
-# print(result["chart"])
-print(result["insights"])
+# # print(result["chart"])
+# print(result["insights"])
 
 
 

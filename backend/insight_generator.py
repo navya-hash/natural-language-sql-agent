@@ -1,10 +1,9 @@
 from llm import llm
 
-
 def generate_insights(question, result):
 
     if len(result) == 0:
-        return []
+        return ""
 
     prompt = f"""
 You are an experienced Business Data Analyst.
