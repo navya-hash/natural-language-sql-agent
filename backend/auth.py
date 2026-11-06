@@ -8,7 +8,6 @@
 
 # The sub claim means subject. In a Clerk session token, it normally identifies the Clerk user.
     
-
 import os
 from pathlib import Path
 

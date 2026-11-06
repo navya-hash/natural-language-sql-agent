@@ -6,6 +6,13 @@ The agent translates natural language questions into database queries, enforces 
 
 ---
 
+## 🌐 Live Demo
+
+- **Frontend (Live Demo):** [https://natural-language-sql-agent.vercel.app/](https://natural-language-sql-agent.vercel.app/)
+- **Backend API:** [https://natural-language-sql-agent.onrender.com](https://natural-language-sql-agent.onrender.com)
+
+---
+
 ## 🌟 Key Features
 
 * **Multi-Tenant User Authentication**: Full user authentication powered by **Clerk** (`clerk-backend-api` on FastAPI and `@clerk/react` on the frontend). Each user has private, isolated database connections and conversation histories.
